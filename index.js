@@ -87,6 +87,7 @@ app.post("/contatos", (req, res) => {
 });
 
 // 🔹 Inicia o servidor
+const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
-  console.log(`Backend rodando em http://localhost:${PORT}`);
+  console.log(`Backend rodando na porta ${PORT}`);
 });
