@@ -8,7 +8,11 @@ const path = require("path");
 const { google } = require("googleapis");
 
 const app = express();
+<<<<<<< HEAD
 const PORT = process.env.PORT || 5000; // Render usa a porta automática
+=======
+const PORT = process.env.PORT || 5000; // 🔹 Render usa a porta automática
+>>>>>>> 9dc2596950583cd4499e0bc479663fc8eaaa0a54
 
 app.use(cors());
 app.use(express.json());
@@ -128,4 +132,8 @@ app.post("/contatos", async (req, res) => {
 
 app.listen(PORT, () => {
   console.log(`✅ Backend rodando na porta ${PORT}`);
+<<<<<<< HEAD
 });
+=======
+});
+>>>>>>> 9dc2596950583cd4499e0bc479663fc8eaaa0a54
