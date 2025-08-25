@@ -3,55 +3,48 @@ const express = require("express");
 const fs = require("fs");
 const cors = require("cors");
 const path = require("path");
-const { google } = require("googleapis"); // Google Sheets
+
+// Google Sheets
+const { google } = require("googleapis");
 
 const app = express();
 const PORT = process.env.PORT || 5000;
 app.use(cors());
 app.use(express.json());
 
-// ---------------- ARQUIVOS LOCAIS ----------------
+// Servir arquivos estáticos
 app.use("/arquivos", express.static(path.join(__dirname, "arquivos")));
+
 const edicoesPath = path.join(__dirname, "edicoes.json");
 const contatosPath = path.join(__dirname, "contatos.json");
 
 // ---------------- CONFIG GOOGLE SHEETS ----------------
 let auth;
-try {
+if (process.env.GOOGLE_CREDENTIALS) {
   auth = new google.auth.GoogleAuth({
-    keyFile: path.join(__dirname, "credentials.json"), // 🔹 deve existir no servidor
+    credentials: JSON.parse(process.env.GOOGLE_CREDENTIALS), // pega do Render
     scopes: ["https://www.googleapis.com/auth/spreadsheets"],
   });
-} catch (e) {
-  console.warn("⚠️ Sem credentials.json - integração com Google Sheets desativada.");
+} else {
+  console.warn("⚠️ GOOGLE_CREDENTIALS não configurado. Só irá salvar localmente.");
 }
 
-const spreadsheetId = process.env.SHEET_ID || "1tDOxSS_CuCsmqkKMH9NhwPMImv3HfWNuMjHVqNfAwuE";
+const spreadsheetId = process.env.SHEET_ID || "1tDOxSS_CuCsmqkKMH9NhwPMImv3HfWNuMjHVqNfAwuE"; // pegue do Render também
 
 async function salvarNoGoogleSheets(nome, email) {
-  if (!auth) {
-    console.warn("⚠️ Google Sheets não configurado. Apenas JSON será atualizado.");
-    return;
-  }
+  if (!auth) return; // se não tiver credenciais, ignora
 
-  try {
-    const authClient = await auth.getClient();
-    const sheets = google.sheets({ version: "v4", auth: authClient });
+  const authClient = await auth.getClient();
+  const sheets = google.sheets({ version: "v4", auth: authClient });
 
-    const data = [[nome, email, new Date().toISOString()]];
+  const data = [[nome, email, new Date().toISOString()]];
 
-    await sheets.spreadsheets.values.append({
-      spreadsheetId,
-      range: "Contatos!A:C", // Nome da aba + colunas
-      valueInputOption: "USER_ENTERED",
-      requestBody: { values: data },
-    });
-
-    console.log("✅ Contato salvo no Google Sheets:", nome, email);
-  } catch (err) {
-    console.error("❌ Erro no salvarNoGoogleSheets:", err);
-    throw err;
-  }
+  await sheets.spreadsheets.values.append({
+    spreadsheetId,
+    range: "A:C", // Nome | Email | Data
+    valueInputOption: "USER_ENTERED",
+    resource: { values: data },
+  });
 }
 
 // ---------------- EDIÇÕES ----------------
@@ -95,7 +88,7 @@ app.post("/edicoes", (req, res) => {
 });
 
 // ---------------- CONTATOS ----------------
-app.post("/contatos", (req, res) => {
+app.post("/contatos", async (req, res) => {
   const { nome, email } = req.body;
 
   if (!nome || !email) {
@@ -115,16 +108,22 @@ app.post("/contatos", (req, res) => {
     const novoContato = { nome, email, data: new Date().toISOString() };
     contatos.push(novoContato);
 
-    fs.writeFile(contatosPath, JSON.stringify(contatos, null, 2), { encoding: "utf8" }, async (err) => {
-      if (err) return res.status(500).json({ error: "Erro ao salvar contato" });
+    fs.writeFile(
+      contatosPath,
+      JSON.stringify(contatos, null, 2),
+      { encoding: "utf8" },
+      async (err) => {
+        if (err) return res.status(500).json({ error: "Erro ao salvar contato" });
 
-      try {
-        await salvarNoGoogleSheets(nome, email);
-        res.json({ message: "Contato salvo com sucesso (JSON + Sheets)" });
-      } catch {
-        res.json({ message: "Contato salvo no JSON, mas falhou no Google Sheets" });
+        try {
+          await salvarNoGoogleSheets(nome, email);
+          res.json({ message: "Contato salvo com sucesso (JSON + Sheets)" });
+        } catch (e) {
+          console.error("Erro ao salvar no Google Sheets:", e);
+          res.status(500).json({ error: "Erro ao salvar no Google Sheets" });
+        }
       }
-    });
+    );
   });
 });
 
