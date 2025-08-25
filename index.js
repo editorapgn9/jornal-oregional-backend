@@ -3,45 +3,58 @@ const express = require("express");
 const fs = require("fs");
 const cors = require("cors");
 const path = require("path");
-
-// Google Sheets
-const { google } = require("googleapis");
+const { google } = require("googleapis"); // Google Sheets
 
 const app = express();
-const PORT = process.env.PORT || 5000; // Render usa a porta automática
+const PORT = process.env.PORT || 5000;
 app.use(cors());
 app.use(express.json());
 
-// Servir arquivos estáticos
+// ---------------- ARQUIVOS LOCAIS ----------------
 app.use("/arquivos", express.static(path.join(__dirname, "arquivos")));
-
 const edicoesPath = path.join(__dirname, "edicoes.json");
 const contatosPath = path.join(__dirname, "contatos.json");
 
 // ---------------- CONFIG GOOGLE SHEETS ----------------
-const auth = new google.auth.GoogleAuth({
-  keyFile: path.join(__dirname, "credentials.json"), // credenciais do Google Cloud
-  scopes: ["https://www.googleapis.com/auth/spreadsheets"],
-});
+let auth;
+try {
+  auth = new google.auth.GoogleAuth({
+    keyFile: path.join(__dirname, "credentials.json"), // 🔹 deve existir no servidor
+    scopes: ["https://www.googleapis.com/auth/spreadsheets"],
+  });
+} catch (e) {
+  console.warn("⚠️ Sem credentials.json - integração com Google Sheets desativada.");
+}
 
-const spreadsheetId = "1tDOxSS_CuCsmqkKMH9NhwPMImv3HfWNuMjHVqNfAwuE"; // <-- substitua pelo ID da sua planilha
+const spreadsheetId = process.env.SHEET_ID || "1tDOxSS_CuCsmqkKMH9NhwPMImv3HfWNuMjHVqNfAwuE";
 
 async function salvarNoGoogleSheets(nome, email) {
-  const authClient = await auth.getClient();
-  const sheets = google.sheets({ version: "v4", auth: authClient });
+  if (!auth) {
+    console.warn("⚠️ Google Sheets não configurado. Apenas JSON será atualizado.");
+    return;
+  }
 
-  const data = [[nome, email, new Date().toISOString()]];
+  try {
+    const authClient = await auth.getClient();
+    const sheets = google.sheets({ version: "v4", auth: authClient });
 
-  await sheets.spreadsheets.values.append({
-    spreadsheetId,
-    range: "A:C", // Nome | Email | Data
-    valueInputOption: "USER_ENTERED",
-    resource: { values: data },
-  });
+    const data = [[nome, email, new Date().toISOString()]];
+
+    await sheets.spreadsheets.values.append({
+      spreadsheetId,
+      range: "Contatos!A:C", // Nome da aba + colunas
+      valueInputOption: "USER_ENTERED",
+      requestBody: { values: data },
+    });
+
+    console.log("✅ Contato salvo no Google Sheets:", nome, email);
+  } catch (err) {
+    console.error("❌ Erro no salvarNoGoogleSheets:", err);
+    throw err;
+  }
 }
 
 // ---------------- EDIÇÕES ----------------
-// GET - lista todas as edições
 app.get("/edicoes", (req, res) => {
   fs.readFile(edicoesPath, "utf8", (err, data) => {
     if (err) return res.status(500).json({ error: "Erro ao ler edicoes.json" });
@@ -55,7 +68,6 @@ app.get("/edicoes", (req, res) => {
   });
 });
 
-// POST - adiciona uma nova edição
 app.post("/edicoes", (req, res) => {
   const novaEdicao = req.body;
 
@@ -83,8 +95,7 @@ app.post("/edicoes", (req, res) => {
 });
 
 // ---------------- CONTATOS ----------------
-// POST - salva contato no arquivo + Google Sheets
-app.post("/contatos", async (req, res) => {
+app.post("/contatos", (req, res) => {
   const { nome, email } = req.body;
 
   if (!nome || !email) {
@@ -104,24 +115,16 @@ app.post("/contatos", async (req, res) => {
     const novoContato = { nome, email, data: new Date().toISOString() };
     contatos.push(novoContato);
 
-    // Grava no arquivo local
-    fs.writeFile(
-      contatosPath,
-      JSON.stringify(contatos, null, 2),
-      { encoding: "utf8" },
-      async (err) => {
-        if (err) return res.status(500).json({ error: "Erro ao salvar contato" });
+    fs.writeFile(contatosPath, JSON.stringify(contatos, null, 2), { encoding: "utf8" }, async (err) => {
+      if (err) return res.status(500).json({ error: "Erro ao salvar contato" });
 
-        try {
-          // Também grava no Google Sheets
-          await salvarNoGoogleSheets(nome, email);
-          res.json({ message: "Contato salvo com sucesso (JSON + Sheets)" });
-        } catch (e) {
-          console.error("Erro ao salvar no Google Sheets:", e);
-          res.status(500).json({ error: "Erro ao salvar no Google Sheets" });
-        }
+      try {
+        await salvarNoGoogleSheets(nome, email);
+        res.json({ message: "Contato salvo com sucesso (JSON + Sheets)" });
+      } catch {
+        res.json({ message: "Contato salvo no JSON, mas falhou no Google Sheets" });
       }
-    );
+    });
   });
 });
 
