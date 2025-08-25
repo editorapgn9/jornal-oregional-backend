@@ -12,28 +12,32 @@ const PORT = process.env.PORT || 5000;
 app.use(cors());
 app.use(express.json());
 
-// Servir arquivos estáticos
 app.use("/arquivos", express.static(path.join(__dirname, "arquivos")));
 
 const edicoesPath = path.join(__dirname, "edicoes.json");
 const contatosPath = path.join(__dirname, "contatos.json");
 
 // ---------------- CONFIG GOOGLE SHEETS ----------------
-let auth;
-if (process.env.GOOGLE_CREDENTIALS) {
-  auth = new google.auth.GoogleAuth({
-    credentials: JSON.parse(process.env.GOOGLE_CREDENTIALS), // pega do Render
-    scopes: ["https://www.googleapis.com/auth/spreadsheets"],
-  });
-} else {
-  console.warn("⚠️ GOOGLE_CREDENTIALS não configurado. Só irá salvar localmente.");
+let googleCredentials;
+try {
+  googleCredentials = JSON.parse(process.env.GOOGLE_CREDENTIALS);
+
+  // Corrige o private_key (recoloca quebras de linha caso o Render tenha escapado)
+  if (googleCredentials.private_key) {
+    googleCredentials.private_key = googleCredentials.private_key.replace(/\\n/g, '\n');
+  }
+} catch (err) {
+  console.error("❌ Erro ao carregar GOOGLE_CREDENTIALS:", err);
 }
 
-const spreadsheetId = process.env.SHEET_ID || "1tDOxSS_CuCsmqkKMH9NhwPMImv3HfWNuMjHVqNfAwuE"; // pegue do Render também
+const auth = new google.auth.GoogleAuth({
+  credentials: googleCredentials,
+  scopes: ["https://www.googleapis.com/auth/spreadsheets"],
+});
+
+const spreadsheetId = "1tDOxSS_CuCsmqkKMH9NhwPMImv3HfWNuMjHVqNfAwuE";
 
 async function salvarNoGoogleSheets(nome, email) {
-  if (!auth) return; // se não tiver credenciais, ignora
-
   const authClient = await auth.getClient();
   const sheets = google.sheets({ version: "v4", auth: authClient });
 
@@ -41,13 +45,15 @@ async function salvarNoGoogleSheets(nome, email) {
 
   await sheets.spreadsheets.values.append({
     spreadsheetId,
-    range: "A:C", // Nome | Email | Data
+    range: "A:C",
     valueInputOption: "USER_ENTERED",
     resource: { values: data },
   });
 }
 
-// ---------------- EDIÇÕES ----------------
+// ---------------- ROTAS ----------------
+
+// GET edições
 app.get("/edicoes", (req, res) => {
   fs.readFile(edicoesPath, "utf8", (err, data) => {
     if (err) return res.status(500).json({ error: "Erro ao ler edicoes.json" });
@@ -61,6 +67,7 @@ app.get("/edicoes", (req, res) => {
   });
 });
 
+// POST nova edição
 app.post("/edicoes", (req, res) => {
   const novaEdicao = req.body;
 
@@ -87,7 +94,7 @@ app.post("/edicoes", (req, res) => {
   });
 });
 
-// ---------------- CONTATOS ----------------
+// POST contato
 app.post("/contatos", async (req, res) => {
   const { nome, email } = req.body;
 
@@ -119,7 +126,7 @@ app.post("/contatos", async (req, res) => {
           await salvarNoGoogleSheets(nome, email);
           res.json({ message: "Contato salvo com sucesso (JSON + Sheets)" });
         } catch (e) {
-          console.error("Erro ao salvar no Google Sheets:", e);
+          console.error("❌ Erro ao salvar no Google Sheets:", e.message);
           res.status(500).json({ error: "Erro ao salvar no Google Sheets" });
         }
       }
